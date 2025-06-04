@@ -90,17 +90,17 @@ Technical Highlights:
 
 How to Use (Basic):
 
-    Install and activate the plugin.
+  Install and activate the plugin.
 
-    Site Administrators (or Editors) configure the EVE Application Client ID and Secret Key on the "EVE Skills Settings" page. Ensure the Callback URL matches the one provided on the settings page.
+  Site Administrators (or Editors) configure the EVE Application Client ID and Secret Key on the "EVE Skills Settings" page. Ensure the Callback URL matches the one provided on the settings page.
 
-    Place the shortcode [eve_sso_login_button] on any page or post to allow users to start the authentication process.
+  Place the shortcode [eve_sso_login_button] on any page or post to allow users to start the authentication process.
 
-        Example: [eve_sso_login_button text="Link Your EVE Main Character"]
+  Example: [eve_sso_login_button text="Link Your EVE Main Character"]
 
-    Users click the button and are guided through EVE SSO.
+  Users click the button and are guided through EVE SSO.
 
-    Administrators can review collected skill data under "EVE Skills" -> "View All User Skills."
+  Administrators can review collected skill data under "EVE Skills" -> "View All User Skills."
 ![image](https://github.com/user-attachments/assets/3072b669-7614-4a43-bf09-9ab552069c8d)
 ![image](https://github.com/user-attachments/assets/26c7bfc1-035f-4383-9473-9c6cb94e6539)
 ![image](https://github.com/user-attachments/assets/a84bd68c-fed2-46aa-a4a5-3c0230a2eaef)
