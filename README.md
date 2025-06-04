@@ -103,4 +103,6 @@ How to Use (Basic):
   Administrators can review collected skill data under "EVE Skills" -> "View All User Skills."
 ![image](https://github.com/user-attachments/assets/3072b669-7614-4a43-bf09-9ab552069c8d)
 ![image](https://github.com/user-attachments/assets/26c7bfc1-035f-4383-9473-9c6cb94e6539)
-![image](https://github.com/user-attachments/assets/a84bd68c-fed2-46aa-a4a5-3c0230a2eaef)
+![image](https://github.com/user-attachments/assets/41762dd7-ce87-4b15-981d-5228c5e0b2e4)
+![image](https://github.com/user-attachments/assets/028ad1b3-669a-4c98-a6a1-262853996858)
+
