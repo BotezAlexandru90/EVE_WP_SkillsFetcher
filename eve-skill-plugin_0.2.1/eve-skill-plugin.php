@@ -2,7 +2,7 @@
 /**
  * Plugin Name: EVE Online Skill Viewer (Main/Alts & Admin Tools)
  * Description: Allows users to authenticate a main EVE character and link alts. Provides admin tools for character management and asset viewing.
- * Version: 0.2.1 
+ * Version: 0.2.1
  * Author: Surama Badasaz
  * Author URI: https://zkillboard.com/character/91036298/
  * License: GPLv2 or later
@@ -32,43 +32,65 @@ function esp_start_session_if_needed() { if ( ! session_id() && ! headers_sent()
 add_action( 'init', 'esp_start_session_if_needed', 1 ); 
 
 // --- MESSAGES & NOTICES ---
-function esp_display_sso_message( $message_key ) { 
-    $message_key = sanitize_key($message_key); $class = 'notice eve-sso-message is-dismissible '; $text = '';
-    switch($message_key) {
-        case 'sso_success': $class .= 'notice-success'; $text = esc_html__( 'Main EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin' ); if (isset($_GET['new_user']) && $_GET['new_user'] === 'true') { $text .= ' ' . esc_html__('A WordPress account has been created for you and you are now logged in.', 'eve-skill-plugin'); } break;
-        case 'sso_alt_success': $class .= 'notice-success'; $text = esc_html__( 'Alt EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin' ); break;
-        case 'sso_skills_failed': $class .= 'notice-warning'; $text = esc_html__( 'EVE authentication was successful, but skills could not be fetched.', 'eve-skill-plugin' ); break;
-        case 'sso_assets_failed': $class .= 'notice-warning'; $text = esc_html__( 'EVE authentication was successful, skills fetched, but assets could not be fetched.', 'eve-skill-plugin' ); break; 
-        case 'sso_skills_assets_failed': $class .= 'notice-warning'; $text = esc_html__( 'EVE authentication was successful, but both skills and assets could not be fetched.', 'eve-skill-plugin' ); break; 
-        case 'all_data_cleared': $class .= 'notice-success'; $text = esc_html__( 'All your EVE Online data (main and alts) has been cleared from this site.', 'eve-skill-plugin' ); break;
-        case 'alt_removed': $class .= 'notice-success'; $text = esc_html__( 'Alt character has been removed successfully by you.', 'eve-skill-plugin' ); break;
-        case 'admin_alt_removed': $class .= 'notice-success'; $text = esc_html__( 'Alt character has been removed by administrator.', 'eve-skill-plugin' ); break;
-        case 'admin_alt_promoted': $class .= 'notice-success'; $text = esc_html__( 'Alt character has been promoted to main by administrator.', 'eve-skill-plugin' ); break;
-        case 'admin_alt_assigned_new_main': $class .= 'notice-success'; $text = esc_html__( 'Character has been successfully assigned as an alt to the new main user.', 'eve-skill-plugin' ); break;
-        case 'admin_main_reassigned_as_alt': $class .= 'notice-success'; $text = esc_html__( 'Main character has been successfully reassigned as an alt to the target user.', 'eve-skill-plugin' ); break;
-        case 'admin_alt_already_main': $class .= 'notice-warning'; $text = esc_html__( 'This character is already the main for this user.', 'eve-skill-plugin'); break;
-        case 'admin_alt_not_found_for_promote': case 'admin_alt_not_found': case 'admin_assign_alt_not_found_orig': $class .= 'notice-error'; $text = esc_html__( 'Specified alt character not found for the original user.', 'eve-skill-plugin'); break;
-        case 'admin_assign_failed_params': case 'admin_op_failed_params': $class .= 'notice-error'; $text = esc_html__( 'Administrator operation failed due to missing parameters.', 'eve-skill-plugin'); break;
-        case 'admin_assign_same_user': $class .= 'notice-error'; $text = esc_html__( 'Cannot assign a character to the same user it already belongs to.', 'eve-skill-plugin'); break;
-        case 'admin_assign_new_main_invalid': $class .= 'notice-error'; $text = esc_html__( 'The selected target user is invalid or does not have a main character defined.', 'eve-skill-plugin'); break;
-        case 'admin_assign_alt_is_new_main': $class .= 'notice-error'; $text = esc_html__( 'The character to move is already the main character of the selected target user.', 'eve-skill-plugin'); break;
-        case 'admin_assign_alt_already_exists_new': $class .= 'notice-error'; $text = esc_html__( 'The character to move is already linked as an alt to the selected target user.', 'eve-skill-plugin'); break;
-        case 'admin_reassign_main_has_alts': $class .= 'notice-error'; $text = esc_html__( 'Cannot reassign this main character because it has alts. Please reassign its alts first.', 'eve-skill-plugin'); break;
-        case 'admin_reassign_main_not_found': $class .= 'notice-error'; $text = esc_html__( 'The main character to reassign was not found for the original user.', 'eve-skill-plugin'); break;
-        case 'sso_alt_is_main': $class .= 'notice-warning'; $text = esc_html__( 'This character is already set as your main. Cannot add as alt.', 'eve-skill-plugin'); break;
-        case 'sso_state_mismatch': case 'sso_token_wp_error': case 'sso_token_eve_error': case 'sso_verify_wp_error': case 'sso_verify_eve_error': case 'sso_wp_user_error': case 'sso_internal_user_error': case 'sso_unknown_auth_type': $class .= 'notice-error'; $text = esc_html__( 'An EVE authentication error occurred. Please try again. (Error: ' . $message_key . ')', 'eve-skill-plugin' ); break;
-        case 'sso_no_config': $class .= 'notice-error'; $text = esc_html__( 'EVE integration is not configured by the site administrator.', 'eve-skill-plugin' ); break;
-        case 'doctrine_added': $class .= 'notice-success'; $text = esc_html__( 'Doctrine ship requirements added successfully.', 'eve-skill-plugin' ); break;
-        case 'doctrine_updated': $class .= 'notice-success'; $text = esc_html__( 'Doctrine ship requirements updated successfully.', 'eve-skill-plugin' ); break;
-        case 'doctrine_deleted': $class .= 'notice-success'; $text = esc_html__( 'Doctrine ship requirements deleted successfully.', 'eve-skill-plugin' ); break;
-        case 'doctrine_missing_fields': $class .= 'notice-error'; $text = esc_html__( 'Ship name and skill requirements cannot be empty.', 'eve-skill-plugin' ); break;
-        case 'doctrine_no_valid_skills': $class .= 'notice-warning'; $text = esc_html__( 'No valid skills found in the provided list. Please ensure format is "Skill Name Level".', 'eve-skill-plugin' ); break;
-        case 'doctrine_not_found': $class .= 'notice-error'; $text = esc_html__( 'The specified doctrine ship was not found.', 'eve-skill-plugin' ); break;
+function esp_get_message_config() {
+    return [
+        // Success Notices
+        'sso_success'        => ['class' => 'notice-success', 'text' => __('Main EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin')],
+        'sso_alt_success'    => ['class' => 'notice-success', 'text' => __('Alt EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin')],
+        'all_data_cleared'   => ['class' => 'notice-success', 'text' => __('All your EVE Online data (main and alts) has been cleared from this site.', 'eve-skill-plugin')],
+        'alt_removed'        => ['class' => 'notice-success', 'text' => __('Alt character has been removed successfully by you.', 'eve-skill-plugin')],
+        'admin_alt_removed'  => ['class' => 'notice-success', 'text' => __('Alt character has been removed by administrator.', 'eve-skill-plugin')],
+        'admin_alt_promoted' => ['class' => 'notice-success', 'text' => __('Alt character has been promoted to main by administrator.', 'eve-skill-plugin')],
+        'doctrine_added'     => ['class' => 'notice-success', 'text' => __('Doctrine ship requirements added successfully.', 'eve-skill-plugin')],
+        'doctrine_updated'   => ['class' => 'notice-success', 'text' => __('Doctrine ship requirements updated successfully.', 'eve-skill-plugin')],
+        'doctrine_deleted'   => ['class' => 'notice-success', 'text' => __('Doctrine ship requirements deleted successfully.', 'eve-skill-plugin')],
 
+        // Warning Notices
+        'sso_skills_failed'          => ['class' => 'notice-warning', 'text' => __('EVE authentication was successful, but skills could not be fetched.', 'eve-skill-plugin')],
+        'sso_assets_failed'          => ['class' => 'notice-warning', 'text' => __('EVE authentication was successful, skills fetched, but assets could not be fetched.', 'eve-skill-plugin')],
+        'sso_skills_assets_failed'   => ['class' => 'notice-warning', 'text' => __('EVE authentication was successful, but both skills and assets could not be fetched.', 'eve-skill-plugin')],
+        'admin_alt_already_main'     => ['class' => 'notice-warning', 'text' => __('This character is already the main for this user.', 'eve-skill-plugin')],
+        'sso_alt_is_main'            => ['class' => 'notice-warning', 'text' => __('This character is already set as your main. Cannot add as alt.', 'eve-skill-plugin')],
+        'doctrine_no_valid_skills'   => ['class' => 'notice-warning', 'text' => __('No valid skills found in the provided list. Please ensure format is "Skill Name Level".', 'eve-skill-plugin')],
 
-		
-		default: return; 
-    } if ($text) { printf( '<div class="%1$s"><p>%2$s</p></div>', esc_attr( $class ), $text ); }
+        // Error Notices
+        'sso_no_config'                  => ['class' => 'notice-error', 'text' => __('EVE integration is not configured by the site administrator.', 'eve-skill-plugin')],
+        'doctrine_missing_fields'        => ['class' => 'notice-error', 'text' => __('Ship name and skill requirements cannot be empty.', 'eve-skill-plugin')],
+        'doctrine_not_found'             => ['class' => 'notice-error', 'text' => __('The specified doctrine ship was not found.', 'eve-skill-plugin')],
+        'admin_op_failed_params'         => ['class' => 'notice-error', 'text' => __('Administrator operation failed due to missing parameters.', 'eve-skill-plugin')],
+        'admin_assign_same_user'         => ['class' => 'notice-error', 'text' => __('Cannot assign a character to the same user it already belongs to.', 'eve-skill-plugin')],
+        'admin_reassign_main_has_alts'   => ['class' => 'notice-error', 'text' => __('Cannot reassign this main character because it has alts. Please reassign its alts first.', 'eve-skill-plugin')],
+        
+        // ESI/SSO Error Notices (with placeholder)
+        'sso_state_mismatch'     => ['class' => 'notice-error', 'text' => __('An EVE authentication error occurred. Please try again. (Error: %s)', 'eve-skill-plugin')],
+        'sso_token_wp_error'     => ['class' => 'notice-error', 'text' => __('An EVE authentication error occurred. Please try again. (Error: %s)', 'eve-skill-plugin')],
+        // ... add any other dynamic error messages here ...
+    ];
+}
+
+function esp_display_sso_message( $message_key ) {
+    $message_key = sanitize_key( $message_key );
+    $messages = esp_get_message_config();
+
+    if ( ! isset( $messages[$message_key] ) ) {
+        return;
+    }
+
+    $message_config = $messages[$message_key];
+    $text = $message_config['text'];
+    $class = 'notice eve-sso-message is-dismissible ' . $message_config['class'];
+
+    // Handle dynamic text replacement
+    if (strpos($text, '%s') !== false) {
+        $text = sprintf($text, esc_html($message_key));
+    }
+
+    // Handle special conditional logic
+    if ($message_key === 'sso_success' && isset($_GET['new_user']) && $_GET['new_user'] === 'true') {
+        $text .= ' ' . esc_html__('A WordPress account has been created for you and you are now logged in.', 'eve-skill-plugin');
+    }
+
+    printf('<div class="%1$s"><p>%2$s</p></div>', esc_attr($class), $text);
 }
 
 function esp_show_admin_page_messages() { 
@@ -129,15 +151,12 @@ function esp_get_character_skill_name_map( $character_skills_data ) {
 }
 
 
-function esp_get_character_compliant_doctrines( $user_id, $character_id, $char_type = 'main' ) {
+function esp_get_character_compliant_doctrines( $user_id, $character_id ) {
     $compliant_ship_names = [];
-    $character_skills_data = null;
-
-    if ( $char_type === 'main' ) {
-        $character_skills_data = get_user_meta( $user_id, 'esp_main_skills_data', true );
-    } elseif ( $char_type === 'alt' ) {
-        $character_skills_data = esp_get_alt_character_data_item( $user_id, $character_id, 'skills_data' );
-    }
+    
+    // Just one call to our new helper function!
+    $character = esp_get_character_data( $user_id, $character_id );
+    $character_skills_data = $character['skills_data'] ?? null;
 
     if ( ! $character_skills_data || ! is_array( $character_skills_data ) ) {
         return $compliant_ship_names;
@@ -151,7 +170,6 @@ function esp_get_character_compliant_doctrines( $user_id, $character_id, $char_t
         $character_skill_name_map = esp_get_character_skill_name_map( $character_skills_data );
         set_transient($transient_key, $character_skill_name_map, HOUR_IN_SECONDS); // Cache for an hour
     }
-
 
     $all_doctrines = get_option( 'esp_doctrine_ships', [] );
     if ( empty( $all_doctrines ) ) {
@@ -421,7 +439,7 @@ function esp_render_user_characters_page() {
                     $main_non_compliant_doctrines = array_diff( $all_doctrine_names, $main_compliant_doctrines );
 
                     if ( ! empty( $main_compliant_doctrines ) ) {
-                        echo '<br/><small><strong>' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $main_compliant_doctrines ) ) . '</small>';
+                        echo '<br/><small><strong style="color: #6aa84f;">' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $main_compliant_doctrines ) ) . '</small>';
                     }
                     if ( ! empty( $main_non_compliant_doctrines ) ) {
                         echo '<br/><small><strong style="color: #dc3232;">' . esc_html__( 'Cannot fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $main_non_compliant_doctrines ) ) . '</small>';
@@ -464,7 +482,7 @@ function esp_render_user_characters_page() {
                         $alt_non_compliant_doctrines = array_diff( $all_doctrine_names, $alt_compliant_doctrines );
 
                         if ( ! empty( $alt_compliant_doctrines ) ) {
-                            echo '<br/><small><strong>' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $alt_compliant_doctrines ) ) . '</small>';
+                            echo '<br/><small><strong style="color: #6aa84f;">' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $alt_compliant_doctrines ) ) . '</small>';
                         }
                         if ( ! empty( $alt_non_compliant_doctrines ) ) {
                             echo '<br/><small><strong style="color: #dc3232;">' . esc_html__( 'Cannot fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $alt_non_compliant_doctrines ) ) . '</small>';
@@ -543,7 +561,48 @@ function esp_update_alt_character_data_item($user_id, $alt_char_id, $item_key, $
     } 
     update_user_meta($user_id, 'esp_alt_characters', $alt_characters);
 }
+/**
+ * Retrieves a consolidated data array for a specific character, regardless of type (main or alt).
+ *
+ * @param int $user_id The WordPress user ID.
+ * @param int $character_id The EVE character ID.
+ * @return array|null A structured array of the character's data, or null if not found.
+ */
+function esp_get_character_data($user_id, $character_id) {
+    $main_char_id = get_user_meta($user_id, 'esp_main_eve_character_id', true);
 
+    if ($character_id == $main_char_id) {
+        // It's the main character. We need to build the data array from individual meta fields.
+        return [
+            'id'                     => (int) $main_char_id,
+            'name'                   => get_user_meta($user_id, 'esp_main_eve_character_name', true),
+            'owner_hash'             => get_user_meta($user_id, 'esp_main_owner_hash', true),
+            'access_token'           => get_user_meta($user_id, 'esp_main_access_token', true),
+            'refresh_token'          => get_user_meta($user_id, 'esp_main_refresh_token', true),
+            'token_expires'          => get_user_meta($user_id, 'esp_main_token_expires', true),
+            'skills_data'            => get_user_meta($user_id, 'esp_main_skills_data', true),
+            'total_sp'               => get_user_meta($user_id, 'esp_main_total_sp', true),
+            'skills_last_updated'    => get_user_meta($user_id, 'esp_main_skills_last_updated', true),
+            'assets_data'            => get_user_meta($user_id, 'esp_main_assets_data', true),
+            'assets_last_updated'    => get_user_meta($user_id, 'esp_main_assets_last_updated', true),
+            'type'                   => 'main', // Add a type for convenience
+        ];
+    }
+
+    // If not main, it must be an alt. Let's find it.
+    $alt_characters = get_user_meta($user_id, 'esp_alt_characters', true);
+    if (is_array($alt_characters)) {
+        foreach ($alt_characters as $alt) {
+            if (isset($alt['id']) && $alt['id'] == $character_id) {
+                $alt['type'] = 'alt'; // Add a type for convenience
+                return $alt; // The alt array is already in the correct format
+            }
+        }
+    }
+
+    // If we reach here, the character was not found for this user.
+    return null;
+}
 
 // --- CHARACTER ACTION HANDLERS (USER-INITIATED & ADMIN) ---
 function esp_handle_remove_alt_character_base($user_id_to_affect, $alt_char_id_to_remove) {
@@ -860,7 +919,7 @@ function esp_render_view_all_user_skills_page() {
                         $admin_main_non_compliant_doctrines = array_diff( $all_doctrine_names, $admin_main_compliant_doctrines );
 
                         if ( ! empty( $admin_main_compliant_doctrines ) ) {
-                            echo '<div class="char-meta" style="margin-top: 5px;"><strong>' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_main_compliant_doctrines ) ) . '</div>';
+                            echo '<div class="char-meta" style="margin-top: 5px;"><strong style="color: #6aa84f;">' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_main_compliant_doctrines ) ) . '</div>';
                         }
                         if ( ! empty( $admin_main_non_compliant_doctrines ) ) {
                             echo '<div class="char-meta" style="margin-top: 5px;"><strong style="color: #dc3232;">' . esc_html__( 'Cannot fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_main_non_compliant_doctrines ) ) . '</div>';
@@ -915,7 +974,7 @@ function esp_render_view_all_user_skills_page() {
                                 $admin_alt_non_compliant_doctrines = array_diff( $all_doctrine_names, $admin_alt_compliant_doctrines );
 
                                 if ( ! empty( $admin_alt_compliant_doctrines ) ) {
-                                    echo '<div class="char-meta" style="margin-top: 5px;"><strong>' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_alt_compliant_doctrines ) ) . '</div>';
+                                    echo '<div class="char-meta" style="margin-top: 5px;"><strong style="color: #6aa84f;">' . esc_html__( 'Can fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_alt_compliant_doctrines ) ) . '</div>';
                                 }
                                 if ( ! empty( $admin_alt_non_compliant_doctrines ) ) {
                                     echo '<div class="char-meta" style="margin-top: 5px;"><strong style="color: #dc3232;">' . esc_html__( 'Cannot fly:', 'eve-skill-plugin' ) . '</strong> ' . esc_html( implode( ', ', $admin_alt_non_compliant_doctrines ) ) . '</div>';
@@ -997,20 +1056,25 @@ function esp_render_view_all_user_skills_page() {
 }
 
 function esp_display_character_skills_for_admin( $user_id_to_view, $character_id_to_display ) {
-    $main_char_id = get_user_meta($user_id_to_view, 'esp_main_eve_character_id', true);
-    $is_main = ($character_id_to_display == $main_char_id);
-    $skills_data  = null; $total_sp = 0; $last_updated = null;
-    if ($is_main) {
-        $skills_data  = get_user_meta( $user_id_to_view, 'esp_main_skills_data', true );
-        $total_sp     = get_user_meta( $user_id_to_view, 'esp_main_total_sp', true );
-        $last_updated = get_user_meta( $user_id_to_view, 'esp_main_skills_last_updated', true);
-    } else { 
-        $skills_data  = esp_get_alt_character_data_item($user_id_to_view, $character_id_to_display, 'skills_data');
-        $total_sp     = esp_get_alt_character_data_item($user_id_to_view, $character_id_to_display, 'total_sp');
-        $last_updated = esp_get_alt_character_data_item($user_id_to_view, $character_id_to_display, 'skills_last_updated');
+    // A single call gets all the data we need.
+    $character = esp_get_character_data($user_id_to_view, $character_id_to_display);
+
+    if (!$character) {
+        echo '<p>' . esc_html__('Character data could not be found for this user.', 'eve-skill-plugin') . '</p>';
+        return;
     }
-    if ($last_updated) { echo '<p><small>' . sprintf(esc_html__('Skills last updated: %s', 'eve-skill-plugin'), esc_html(wp_date( get_option('date_format') . ' ' . get_option('time_format'), (int)$last_updated))) . '</small></p>';
-    } else { echo '<p><small>' . esc_html__('Skills last updated: Unknown', 'eve-skill-plugin') . '</small></p>'; }
+    
+    // Safely get the values from the returned array.
+    $skills_data  = $character['skills_data'] ?? null;
+    $total_sp     = $character['total_sp'] ?? 0;
+    $last_updated = $character['skills_last_updated'] ?? null;
+
+    if ($last_updated) { 
+        echo '<p><small>' . sprintf(esc_html__('Skills last updated: %s', 'eve-skill-plugin'), esc_html(wp_date( get_option('date_format') . ' ' . get_option('time_format'), (int)$last_updated))) . '</small></p>';
+    } else { 
+        echo '<p><small>' . esc_html__('Skills last updated: Unknown', 'eve-skill-plugin') . '</small></p>'; 
+    }
+
     if ( $skills_data && is_array( $skills_data ) && !empty($skills_data) ) {
         echo '<p>' . sprintf( esc_html__( 'Total Skillpoints: %s', 'eve-skill-plugin' ), number_format( (float) $total_sp ) ) . '</p>';
         echo '<table class="wp-list-table widefat striped"><thead><tr><th>Skill Name</th><th>Skill ID</th><th>Level</th><th>Skillpoints</th></tr></thead><tbody>';
