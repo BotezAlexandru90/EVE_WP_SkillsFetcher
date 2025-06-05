@@ -3,8 +3,8 @@
  * Plugin Name: EVE Online Skill Viewer (Main/Alts & Admin Tools)
  * Description: Allows users to authenticate a main EVE character and link alts. Provides admin tools for character management.
  * Version: 0.1.10
- * Author: Your Name
- * Author URI: https://your-website.com
+ * Author: Surama Badasaz
+ * Author URI: https://zkillboard.com/character/91036298/
  * License: GPLv2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: eve-skill-plugin
