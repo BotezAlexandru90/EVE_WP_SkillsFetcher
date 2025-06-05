@@ -110,7 +110,7 @@ add_action( 'admin_notices', 'esp_show_admin_page_messages');
 // --- ADMIN MENU & SETTINGS ---
 function esp_add_admin_menu() {
     add_menu_page( __( 'EVE Online Data', 'eve-skill-plugin' ), __( 'EVE Data', 'eve-skill-plugin' ), 'edit_others_pages', 'eve_skill_plugin_settings', 'esp_render_settings_page', 'dashicons-id-alt');
-    add_submenu_page( 'eve_skill_plugin_settings', __( 'My Linked EVE Characters', 'eve-skill-plugin' ), __( 'My Linked Characters', 'eve-skill-plugin' ), 'read', 'eve_skill_user_characters_page', 'esp_render_user_characters_page');
+    //add_submenu_page( 'eve_skill_plugin_settings', __( 'My Linked EVE Characters', 'eve-skill-plugin' ), __( 'My Linked Characters', 'eve-skill-plugin' ), 'read', 'eve_skill_user_characters_page', 'esp_render_user_characters_page');
     add_submenu_page( 'eve_skill_plugin_settings', __( 'View All User EVE Skills', 'eve-skill-plugin' ), __( 'View All User Skills', 'eve-skill-plugin' ), 'manage_options', 'eve_view_all_user_skills', 'esp_render_view_all_user_skills_page');
     add_submenu_page( 'eve_skill_plugin_settings', __( 'View All User EVE Assets', 'eve-skill-plugin' ), __( 'View Assets', 'eve-skill-plugin' ), 'manage_options', 'eve_view_all_user_assets', 'esp_render_view_all_user_assets_page');
 	add_submenu_page(
