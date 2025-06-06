@@ -32,6 +32,15 @@ Key Features:
 - Doctrine ships management:
   - Add/Edit/Delete doctrine ships
   - Visual indication on each character with what ships he character can fly/use.
+    
+- Wallet History analysis:
+  - Corporation logo for easy identification of specific corporation links
+  - Blue and Bold characters are Authenticated Character. This is a character (main or alt) that is registered on your website.
+  - Orange: An Unauthenticated Character. This is any other player or NPC in EVE Online that is not registered on your website.
+  - Filtering system
+  - Built a beautiful ISK history chart to visualize the data.
+    - 90/30/7 days timeframe to analyze
+    - Individual chart visualization for each character linked to the Main.
 
 Administrator Tools & Oversight:
 - Plugin Settings Page: For configuring EVE Application Client ID, Secret Key, and Scopes. Accessible by Editors and Administrators.
@@ -76,5 +85,6 @@ How to Use (Basic):
 ![image](https://github.com/user-attachments/assets/26c7bfc1-035f-4383-9473-9c6cb94e6539)
 ![image](https://github.com/user-attachments/assets/ebe902ce-2b5d-4e70-91da-3a4ddb0600cc)
 ![image](https://github.com/user-attachments/assets/c8a155e2-5ed4-4c4a-8422-cc27ae7f96a0)
+![image](https://github.com/user-attachments/assets/35c00a05-6b0f-475e-8ca0-6b22aaa07118)
 
 
