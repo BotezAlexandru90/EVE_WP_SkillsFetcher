@@ -1,5 +1,8 @@
 # EVE_WP_SkillsFetcher
-EVE Online Skill Integration for WordPress
+EVE Online Corp management Plugin for Eve online
+
+Basically an alternative for SeAT and Alliance Auth that require quite complex infrastructure to run.
+
 
 This WordPress plugin allows users to authenticate their EVE Online characters via EVE SSO (OAuth 2.0), extracting and storing their skill data within your WordPress site. It's designed to support the common EVE Online player structure of having a "Main" character and multiple "Alt" characters, all linked to a single WordPress user account.
 
