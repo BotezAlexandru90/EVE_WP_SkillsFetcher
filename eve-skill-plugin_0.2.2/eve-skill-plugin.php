@@ -36,8 +36,8 @@ add_action( 'init', 'esp_start_session_if_needed', 1 );
 // --- MESSAGES & NOTICES ---
 function esp_get_message_config() {
     return [
-        'sso_success'        => ['class' => 'notice-success', 'text' => __('Main EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin')],
-        'sso_alt_success'    => ['class' => 'notice-success', 'text' => __('Alt EVE character authenticated successfully! Skills and Assets are being fetched.', 'eve-skill-plugin')],
+        'sso_success'        => ['class' => 'notice-success', 'text' => __('Main EVE character authenticated successfully! Skills, Assets and Wallet transactions are being fetched.', 'eve-skill-plugin')],
+        'sso_alt_success'    => ['class' => 'notice-success', 'text' => __('Alt EVE character authenticated successfully! Skills, Assets and Wallet transactions are being fetched.', 'eve-skill-plugin')],
         'all_data_cleared'   => ['class' => 'notice-success', 'text' => __('All your EVE Online data (main and alts) has been cleared from this site.', 'eve-skill-plugin')],
         'alt_removed'        => ['class' => 'notice-success', 'text' => __('Alt character has been removed successfully by you.', 'eve-skill-plugin')],
         'admin_alt_removed'  => ['class' => 'notice-success', 'text' => __('Alt character has been removed by administrator.', 'eve-skill-plugin')],
@@ -59,6 +59,8 @@ function esp_get_message_config() {
         'admin_reassign_main_has_alts'   => ['class' => 'notice-error', 'text' => __('Cannot reassign this main character because it has alts. Please reassign its alts first.', 'eve-skill-plugin')],
         'sso_state_mismatch'     => ['class' => 'notice-error', 'text' => __('An EVE authentication error occurred. Please try again. (Error: %s)', 'eve-skill-plugin')],
         'sso_token_wp_error'     => ['class' => 'notice-error', 'text' => __('An EVE authentication error occurred. Please try again. (Error: %s)', 'eve-skill-plugin')],
+		// Inside the return array of esp_get_message_config()
+		'data_refreshed'     => ['class' => 'notice-success', 'text' => __('Character data has been successfully refreshed from ESI.', 'eve-skill-plugin')],
     ];
 }
 
@@ -321,7 +323,7 @@ function esp_render_settings_page() {
     if ( ! current_user_can( 'edit_others_pages' ) ) { wp_die( esc_html__( 'You do not have sufficient permissions to access this page.', 'eve-skill-plugin' ) ); return; } ?>
     <div class="wrap"> <h1><?php esc_html_e( 'EVE Online Data Viewer Settings', 'eve-skill-plugin' ); ?></h1> <form method="post" action="options.php"> <?php settings_fields( 'esp_settings_group' ); do_settings_sections( 'esp_settings_group' ); ?> <table class="form-table"> <tr valign="top"> <th scope="row"><?php esc_html_e( 'EVE Application Client ID', 'eve-skill-plugin' ); ?></th> <td><input type="text" name="esp_client_id" value="<?php echo esc_attr( get_option( 'esp_client_id' ) ); ?>" size="60" /></td> </tr> <tr valign="top"> <th scope="row"><?php esc_html_e( 'EVE Application Secret Key', 'eve-skill-plugin' ); ?></th> <td><input type="password" name="esp_client_secret" value="<?php echo esc_attr( get_option( 'esp_client_secret' ) ); ?>" size="60" /></td> </tr> <tr valign="top"> <th scope="row"><?php esc_html_e( 'EVE Application Scopes', 'eve-skill-plugin' ); ?></th> <td> <input type="text" name="esp_scopes" value="<?php echo esc_attr( get_option( 'esp_scopes', ESP_DEFAULT_SCOPES ) ); ?>" size="60" /> <p class="description"><?php printf(esc_html__( 'Space separated. Default: %s. Required for assets: esi-assets.read_assets.v1', 'eve-skill-plugin' ), ESP_DEFAULT_SCOPES); ?></p> 
     <?php // CHANGE START: Added warning about new wallet scope. ?>
-    <p class="description" style="color:#c92c2c;"><?php esc_html_e( 'NOTE: The Transaction Viewer requires the "esi-wallet.read_character_wallet.v1" scope. After adding it, users may need to re-authenticate their characters via the "Re-Auth" button for the plugin to fetch their transaction history.', 'eve-skill-plugin' ); ?></p>
+    
     <?php // CHANGE END ?>
     </td> </tr> </table> <?php submit_button(); ?> </form> <hr/> <h2><?php esc_html_e( 'Callback URL for EVE Application', 'eve-skill-plugin' ); ?></h2> <p><?php esc_html_e( 'Use this URL as the "Callback URL" or "Redirect URI" in your EVE Online application settings:', 'eve-skill-plugin' ); ?></p> <code><?php echo esc_url( admin_url( 'admin-post.php?action=' . ESP_SSO_CALLBACK_ACTION_NAME ) ); ?></code> <hr/> <h2><?php esc_html_e( 'Shortcode for Login Button', 'eve-skill-plugin' ); ?></h2> <p><?php esc_html_e( 'To place an EVE Online login button on any page or post, use the following shortcode:', 'eve-skill-plugin' ); ?></p> <code>[eve_sso_login_button]</code> <p><?php esc_html_e( 'You can customize the button text like this:', 'eve-skill-plugin'); ?> <code>[eve_sso_login_button text="Link Your EVE Character"]</code></p> </div> <?php
 }
@@ -573,6 +575,68 @@ function esp_handle_admin_reassign_character() {
     exit;
 }
 add_action('admin_post_esp_admin_reassign_character', 'esp_handle_admin_reassign_character');
+
+/**
+ * Handles the manual admin request to force a data refresh for a specific user.
+ */
+function esp_handle_force_refresh_character_data() {
+    // 1. Security checks
+    if ( ! current_user_can('manage_options') ) {
+        wp_die('Insufficient permissions.');
+    }
+    if ( ! isset( $_POST['esp_force_refresh_nonce'] ) || ! wp_verify_nonce( sanitize_key($_POST['esp_force_refresh_nonce']), 'esp_force_refresh_action' ) ) {
+        wp_die( 'Nonce verification failed!' );
+    }
+
+    $user_id_to_refresh = isset($_POST['user_id_to_refresh']) ? intval($_POST['user_id_to_refresh']) : 0;
+    if ( ! $user_id_to_refresh ) {
+        wp_die( 'No user ID provided.' );
+    }
+
+    // 2. Perform the refresh logic (similar to the cron job, but for a single user)
+    $all_characters = [];
+    $main_char_id = get_user_meta($user_id_to_refresh, 'esp_main_eve_character_id', true);
+    if ($main_char_id) {
+        $all_characters[] = ['id' => $main_char_id, 'type' => 'main'];
+    }
+    $alt_characters = get_user_meta($user_id_to_refresh, 'esp_alt_characters', true);
+    if (is_array($alt_characters)) {
+        foreach ($alt_characters as $alt) {
+            if (isset($alt['id'])) {
+                $all_characters[] = ['id' => $alt['id'], 'type' => 'alt'];
+            }
+        }
+    }
+
+    foreach ($all_characters as $char) {
+        $char_id = $char['id'];
+        $char_type = $char['type'];
+
+        // Always refresh the token to ensure we have a fresh one
+        $refreshed_tokens = esp_refresh_eve_token_for_character_type($user_id_to_refresh, $char_id, $char_type);
+        $access_token = $refreshed_tokens['access_token'] ?? null;
+
+        if ($access_token) {
+            // Fetch all data types
+            esp_fetch_and_store_skills_for_character_type($user_id_to_refresh, $char_id, $access_token, $char_type);
+            sleep(1);
+            esp_fetch_and_store_assets_for_character_type($user_id_to_refresh, $char_id, $access_token, $char_type);
+            sleep(1);
+            esp_fetch_and_store_wallet_journal_for_character_type($user_id_to_refresh, $char_id, $access_token, $char_type);
+            sleep(1);
+        } else {
+            error_log("[ESP Force Refresh] Failed to refresh token for char {$char_id} of user {$user_id_to_refresh}. Skipping data fetch.");
+        }
+    }
+
+    // 3. Redirect back to the same page with a success message
+    $redirect_url = admin_url('admin.php?page=eve_view_all_user_skills&view_user_id=' . $user_id_to_refresh);
+    wp_redirect( add_query_arg( ESP_REDIRECT_MESSAGE_QUERY_ARG, 'data_refreshed', $redirect_url ) );
+    exit;
+}
+add_action('admin_post_esp_force_refresh', 'esp_handle_force_refresh_character_data');
+
+
 
 // CHANGE START: Added new section for data lookup helpers.
 // --- DATA RESOLUTION & LOOKUP HELPERS ---
@@ -1098,7 +1162,7 @@ function esp_render_view_all_user_skills_page() {
     <div class="wrap esp-admin-view">
         <h1><?php esc_html_e( 'View User EVE Characters', 'eve-skill-plugin' ); ?></h1>
         <style>
-            .esp-admin-view .char-tree { list-style-type: none; padding-left: 0; }
+            .esp-admin-view .char-tree { list-style-type: none; width: 49%; padding-left: 0; }
             .esp-admin-view .char-tree ul { list-style-type: none; padding-left: 20px; margin-left: 10px; border-left: 1px dashed #ccc; }
             .esp-admin-view .char-item { padding: 5px 0; }
             .esp-admin-view .char-item strong { font-size: 1.1em; }
@@ -1120,6 +1184,16 @@ function esp_render_view_all_user_skills_page() {
                 echo '</div>'; return;
             }
             echo '<h2>' . sprintf( esc_html__( 'EVE Characters for: %s', 'eve-skill-plugin' ), esc_html( $user_info->display_name ) ) . ' (' . esc_html($user_info->user_login) . ')</h2>';
+			?>
+<div style="margin: 15px 0;">
+    <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" style="display:inline-block;">
+        <input type="hidden" name="action" value="esp_force_refresh">
+        <input type="hidden" name="user_id_to_refresh" value="<?php echo esc_attr($selected_user_id); ?>">
+        <?php wp_nonce_field( 'esp_force_refresh_action', 'esp_force_refresh_nonce' ); ?>
+        <?php submit_button( __( 'Force Data Refresh', 'eve-skill-plugin' ), 'primary small', 'submit_force_refresh', false ); ?>
+    </form>
+</div>
+<?php
             wp_nonce_field( 'esp_view_skills_nonce', 'esp_view_skills_nonce' );
 
             $main_char_id = get_user_meta( $selected_user_id, 'esp_main_eve_character_id', true );
@@ -1130,6 +1204,9 @@ function esp_render_view_all_user_skills_page() {
             if (is_array($all_doctrine_objects) && !empty($all_doctrine_objects)) { foreach ($all_doctrine_objects as $doctrine_item) { if (isset($doctrine_item['ship_name'])) { $all_doctrine_names[] = $doctrine_item['ship_name']; } } sort($all_doctrine_names); }
 
             echo '<ul class="char-tree">';
+			
+			
+
             if ( $main_char_id ) {
                 $main_char_name = get_user_meta( $selected_user_id, 'esp_main_eve_character_name', true );
                 $main_total_sp = get_user_meta( $selected_user_id, 'esp_main_total_sp', true );
@@ -1160,17 +1237,18 @@ function esp_render_view_all_user_skills_page() {
             } else { echo '<li>' . esc_html__( 'No main EVE character linked for this user.', 'eve-skill-plugin' ) . '</li>'; }
             echo '</ul>';
             
-            // This is the HTML block for the chart.
+           // This is the HTML block for the chart.
             echo '<hr style="margin: 30px 0;" />';
             ?>
-            <div id="esp-wallet-chart-container" style="display: none; margin-bottom: 40px;">
+		
+            <div id="esp-wallet-chart-container">
                 <h2><?php esc_html_e('Wallet Balance History (Last 90 Days)', 'eve-skill-plugin'); ?></h2>
-                <div style="margin-bottom: 15px;">
+                <div>
                     <button class="button" data-range="90"><?php esc_html_e('90 Days', 'eve-skill-plugin'); ?></button>
                     <button class="button" data-range="30"><?php esc_html_e('30 Days', 'eve-skill-plugin'); ?></button>
                     <button class="button" data-range="7"><?php esc_html_e('7 Days', 'eve-skill-plugin'); ?></button>
                 </div>
-                <div id="esp-chart-wrapper" style="position: relative; height: 400px; width: 100%;">
+                <div id="esp-chart-wrapper" style="position: relative; height: 302px; width: 100%;">
                     <canvas id="espWalletChart"></canvas>
                 </div>
                 <p id="esp-chart-message" style="text-align: center; padding: 20px;"></p>
