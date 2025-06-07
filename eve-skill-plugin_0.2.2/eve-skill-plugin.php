@@ -199,7 +199,6 @@ function esp_add_admin_menu() {
     add_menu_page( __( 'EVE Online Data', 'eve-skill-plugin' ), __( 'EVE Data', 'eve-skill-plugin' ), 'edit_others_pages', 'eve_skill_plugin_settings', 'esp_render_settings_page', 'dashicons-id-alt');
     add_submenu_page( 'eve_skill_plugin_settings', __( 'My Linked EVE Characters', 'eve-skill-plugin' ), __( 'My Linked Characters', 'eve-skill-plugin' ), 'read', 'eve_skill_user_characters_page', 'esp_render_user_characters_page');
     add_submenu_page( 'eve_skill_plugin_settings', __( 'View All User EVE Skills', 'eve-skill-plugin' ), __( 'View All User Skills', 'eve-skill-plugin' ), 'manage_options', 'eve_view_all_user_skills', 'esp_render_view_all_user_skills_page');
-    add_submenu_page( 'eve_skill_plugin_settings', __( 'View All User EVE Assets', 'eve-skill-plugin' ), __( 'View Assets', 'eve-skill-plugin' ), 'manage_options', 'eve_view_all_user_assets', 'esp_render_view_all_user_assets_page');
 	add_submenu_page('eve_skill_plugin_settings', __( 'Doctrine Ship Requirements', 'eve-skill-plugin' ), __( 'Doctrine Ships', 'eve-skill-plugin' ), 'manage_options', 'eve_skill_doctrine_ships_page', 'esp_render_doctrine_ships_page');
 }
 add_action( 'admin_menu', 'esp_add_admin_menu' );
@@ -1154,6 +1153,106 @@ function esp_display_user_transactions_table($user_id) {
     <?php
     echo '</div>';
 }
+
+
+/**
+ * Renders a filterable table of assets for a given user's characters.
+ *
+ * @param int $user_id The WordPress user ID to display assets for.
+ */
+function esp_display_user_assets_table($user_id) {
+    echo '<div class="assets-viewer">';
+
+    // 1. Fetch and consolidate all asset data for the specified user
+    $all_assets_raw = [];
+    $characters_to_check = [];
+    $main_char_id = get_user_meta($user_id, 'esp_main_eve_character_id', true);
+    if ($main_char_id) { $characters_to_check[] = esp_get_character_data($user_id, $main_char_id); }
+    $alt_characters = get_user_meta($user_id, 'esp_alt_characters', true);
+    if (is_array($alt_characters)) {
+        foreach ($alt_characters as $alt) { if (isset($alt['id'])) { $characters_to_check[] = esp_get_character_data($user_id, $alt['id']); } }
+    }
+
+    foreach ($characters_to_check as $character) {
+        if (empty($character) || empty($character['assets_data'])) continue;
+        foreach ($character['assets_data'] as $asset) {
+            $asset['char_name'] = $character['name'];
+            $asset['char_id'] = $character['id'];
+            $asset['access_token'] = $character['access_token'];
+            $all_assets_raw[] = $asset;
+        }
+    }
+    
+    if (empty($all_assets_raw)) {
+        echo '<p>' . esc_html__('No asset data found for this user.', 'eve-skill-plugin') . '</p></div>';
+        return;
+    }
+
+    // 2. Gather unique values for filter dropdowns
+    $unique_chars = [];
+    $unique_items = [];
+    $unique_locations = [];
+
+    foreach($all_assets_raw as $asset) {
+        $unique_chars[$asset['char_name']] = true;
+        $unique_items[esp_get_item_name($asset['type_id'])] = true;
+        $unique_locations[esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id'])] = true;
+    }
+    ksort($unique_chars); ksort($unique_items); ksort($unique_locations);
+
+    // 3. Get current filter values from URL
+    $filter_char = isset($_GET['filter_asset_char']) ? sanitize_text_field($_GET['filter_asset_char']) : '';
+    $filter_item = isset($_GET['filter_asset_item']) ? sanitize_text_field($_GET['filter_asset_item']) : '';
+    $filter_location = isset($_GET['filter_asset_location']) ? sanitize_text_field($_GET['filter_asset_location']) : '';
+    ?>
+    
+    <form method="get" class="esp-filters">
+        <input type="hidden" name="page" value="eve_view_all_user_skills">
+        <input type="hidden" name="view_user_id" value="<?php echo esc_attr($user_id); ?>">
+        <label><?php esc_html_e('Character:', 'eve-skill-plugin'); ?> <select name="filter_asset_char"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_chars) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_char, $val, false), esc_html($val)); } ?></select></label>
+        <label><?php esc_html_e('Item Name:', 'eve-skill-plugin'); ?> <select name="filter_asset_item"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_items) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_item, $val, false), esc_html($val)); } ?></select></label>
+        <label><?php esc_html_e('Location:', 'eve-skill-plugin'); ?> <select name="filter_asset_location"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_locations) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_location, $val, false), esc_html($val)); } ?></select></label>
+        <input type="submit" class="button button-primary" value="<?php esc_attr_e('Filter', 'eve-skill-plugin'); ?>">
+        <a href="<?php echo esc_url(admin_url('admin.php?page=eve_view_all_user_skills&view_user_id=' . $user_id)); ?>" class="button"><?php esc_html_e('Clear', 'eve-skill-plugin'); ?></a>
+    </form>
+    
+    <?php
+    // 4. Apply filters
+    $filtered_assets = $all_assets_raw;
+    if ($filter_char || $filter_item || $filter_location) {
+        $filtered_assets = array_filter($all_assets_raw, function($asset) use ($filter_char, $filter_item, $filter_location) {
+            $item_name = esp_get_item_name($asset['type_id']);
+            $location_name = esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id']);
+            if ($filter_char && $asset['char_name'] !== $filter_char) return false;
+            if ($filter_item && $item_name !== $filter_item) return false;
+            if ($filter_location && $location_name !== $filter_location) return false;
+            return true;
+        });
+    }
+    ?>
+    <table class="wp-list-table widefat fixed striped">
+        <thead><tr><th><?php esc_html_e('Character', 'eve-skill-plugin'); ?></th><th><?php esc_html_e('Item Name', 'eve-skill-plugin'); ?></th><th style="text-align:right;"><?php esc_html_e('Quantity', 'eve-skill-plugin'); ?></th><th><?php esc_html_e('Location', 'eve-skill-plugin'); ?></th></tr></thead>
+        <tbody>
+            <?php if (empty($filtered_assets)) : ?>
+                <tr><td colspan="4"><?php esc_html_e('No assets match the current filter.', 'eve-skill-plugin'); ?></td></tr>
+            <?php else : ?>
+                <?php foreach ($filtered_assets as $asset) : ?>
+                    <tr>
+                        <td><?php echo esc_html($asset['char_name']); ?></td>
+                        <td><?php echo esc_html(esp_get_item_name($asset['type_id'])); ?></td>
+                        <td style="text-align:right;"><?php echo esc_html(number_format($asset['quantity'])); ?></td>
+                        <td><?php echo esc_html(esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id'])); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </tbody>
+    </table>
+    <?php
+    echo '</div>';
+}
+
+
+
 // CHANGE END
 
 function esp_render_view_all_user_skills_page() {
@@ -1240,7 +1339,7 @@ function esp_render_view_all_user_skills_page() {
            // This is the HTML block for the chart.
             echo '<hr style="margin: 30px 0;" />';
             ?>
-		
+
             <div id="esp-wallet-chart-container">
                 <h2><?php esc_html_e('Wallet Balance History (Last 90 Days)', 'eve-skill-plugin'); ?></h2>
                 <div>
@@ -1254,9 +1353,48 @@ function esp_render_view_all_user_skills_page() {
                 <p id="esp-chart-message" style="text-align: center; padding: 20px;"></p>
             </div>
             <?php wp_nonce_field('esp_wallet_chart_nonce', 'esp_wallet_chart_nonce'); ?>
+
+            <!-- NEW TABBED INTERFACE START -->
+            <style>
+                .esp-tabs-nav { display: flex; border-bottom: 2px solid #ccc; margin-bottom: -2px; padding-left: 0; }
+                .esp-tabs-nav li { list-style: none; margin-bottom: 0; }
+                .esp-tabs-nav a { display: block; padding: 10px 15px; border: 2px solid transparent; text-decoration: none; color: #555; font-size: 1.1em; }
+                .esp-tabs-nav li.active a { border-color: #ccc #ccc #fff #ccc; background: #fff; font-weight: bold; color: #000; }
+                .esp-tab-content { display: none; border: 2px solid #ccc; border-top: none; padding: 20px; background: #fff; }
+                .esp-tab-content.active { display: block; }
+            </style>
+
+            <ul class="esp-tabs-nav">
+                <li class="active"><a href="#tab-transactions"><?php esc_html_e('Recent Wallet Transactions', 'eve-skill-plugin'); ?></a></li>
+                <li><a href="#tab-assets"><?php esc_html_e('Assets', 'eve-skill-plugin'); ?></a></li>
+            </ul>
+
+            <div id="tab-transactions" class="esp-tab-content active">
+                <?php esp_display_user_transactions_table($selected_user_id); ?>
+            </div>
+            <div id="tab-assets" class="esp-tab-content">
+                <?php esp_display_user_assets_table($selected_user_id); ?>
+            </div>
+
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const tabs = document.querySelectorAll('.esp-tabs-nav a');
+                tabs.forEach(tab => {
+                    tab.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        const targetId = this.getAttribute('href');
+                        
+                        document.querySelectorAll('.esp-tabs-nav li').forEach(li => li.classList.remove('active'));
+                        this.parentElement.classList.add('active');
+                        
+                        document.querySelectorAll('.esp-tab-content').forEach(panel => panel.classList.remove('active'));
+                        document.querySelector(targetId).classList.add('active');
+                    });
+                });
+            });
+            </script>
+            <!-- NEW TABBED INTERFACE END -->
             <?php
-            
-            esp_display_user_transactions_table($selected_user_id);
             echo '<p><a href="' . esc_url( admin_url( 'admin.php?page=eve_view_all_user_skills' ) ) . '">« ' . esc_html__( 'Back to all users list', 'eve-skill-plugin' ) . '</a></p>';
         } else {
             // This ELSE block shows the list of all users on the initial page load.
@@ -1286,83 +1424,6 @@ function esp_render_view_all_user_skills_page() {
 }
 
 
-function esp_render_view_all_user_assets_page() {
-    if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'You do not have sufficient permissions to access this page.', 'eve-skill-plugin' ) ); }
-    ?>
-    <div class="wrap esp-admin-view">
-        <h1><?php esc_html_e( 'View User EVE Assets', 'eve-skill-plugin' ); ?></h1>
-        <style>.esp-admin-view .assets-table { width: 100%; margin-top: 20px; border-collapse: collapse; } .esp-admin-view .assets-table th, .esp-admin-view .assets-table td { border: 1px solid #ccc; padding: 8px; text-align: left; } .esp-admin-view .assets-table th { background-color: #f1f1f1; } .esp-admin-view .assets-table td.quantity { text-align: right; } .esp-admin-view .filter-form input[type="text"] { margin-right: 10px; } .esp-admin-view .user-section { margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; background: #fff; } .esp-admin-view .user-section h2 { margin-top: 0;}</style>
-        <?php
-        $filter_char_name = isset($_GET['filter_char_name']) ? sanitize_text_field($_GET['filter_char_name']) : '';
-        $filter_item_name = isset($_GET['filter_item_name']) ? sanitize_text_field($_GET['filter_item_name']) : '';
-        $filter_location_name = isset($_GET['filter_location_name']) ? sanitize_text_field($_GET['filter_location_name']) : '';
-        ?>
-        <form method="get" class="filter-form"><input type="hidden" name="page" value="eve_view_all_user_assets"><?php esc_html_e('Char Name:', 'eve-skill-plugin'); ?> <input type="text" name="filter_char_name" value="<?php echo esc_attr($filter_char_name); ?>"><?php esc_html_e('Item Name:', 'eve-skill-plugin'); ?> <input type="text" name="filter_item_name" value="<?php echo esc_attr($filter_item_name); ?>"><?php esc_html_e('Location:', 'eve-skill-plugin'); ?> <input type="text" name="filter_location_name" value="<?php echo esc_attr($filter_location_name); ?>"><input type="submit" class="button" value="<?php esc_attr_e('Filter', 'eve-skill-plugin'); ?>"><a href="<?php echo esc_url(admin_url('admin.php?page=eve_view_all_user_assets')); ?>" class="button"><?php esc_html_e('Clear Filters', 'eve-skill-plugin'); ?></a></form><hr>
-        <?php
-        $users_with_eve_data = get_users(['meta_query' => ['relation' => 'OR',['key' => 'esp_main_eve_character_id', 'compare' => 'EXISTS'],],'fields' => 'all_with_meta',]);
-        if ( empty( $users_with_eve_data ) ) { echo '<p>' . esc_html__( 'No users have linked EVE characters or no asset data available.', 'eve-skill-plugin' ) . '</p></div>'; return; }
-        foreach ( $users_with_eve_data as $user ) {
-            echo '<div class="user-section">';
-            echo '<h2>' . sprintf( esc_html__( 'Assets for WordPress User: %s', 'eve-skill-plugin' ), esc_html( $user->display_name ) ) . ' (' . esc_html($user->user_login) . ')</h2>';
-            $user_assets_found = false; $character_asset_list_for_user = [];
-            $main_character = esp_get_character_data($user->ID, get_user_meta($user->ID, 'esp_main_eve_character_id', true));
-            if ($main_character && !empty($main_character['assets_data'])) {
-                $user_assets_found = true;
-                foreach($main_character['assets_data'] as $asset) {
-                    $asset['char_name'] = $main_character['name'] . " (Main)"; $asset['char_id'] = $main_character['id'];
-                    $asset['access_token_for_location_lookup'] = $main_character['access_token'];
-                    $character_asset_list_for_user[] = $asset;
-                }
-                if (!empty($main_character['assets_last_updated'])) { echo '<p><small>' . sprintf(esc_html__('Main char assets last updated: %s', 'eve-skill-plugin'), esc_html(wp_date(get_option('date_format').' '.get_option('time_format'), (int)$main_character['assets_last_updated']))) . '</small></p>';}
-            } else if ($main_character) { echo '<p>' . sprintf(esc_html__('No asset data found for main character %s or not yet fetched.', 'eve-skill-plugin'), esc_html($main_character['name'])) . '</p>';}
-            $alt_characters = get_user_meta( $user->ID, 'esp_alt_characters', true );
-            if ( is_array( $alt_characters ) && ! empty( $alt_characters ) ) {
-                foreach ( $alt_characters as $alt_char_base ) {
-                    if ( !isset($alt_char_base['id'])) continue;
-                    $alt_char_full = esp_get_character_data($user->ID, $alt_char_base['id']);
-                    if ( !empty($alt_char_full['assets_data']) ) {
-                        $user_assets_found = true;
-                        foreach ($alt_char_full['assets_data'] as $asset) {
-                            $asset['char_name'] = $alt_char_full['name'] . " (Alt)"; $asset['char_id'] = $alt_char_full['id'];
-                            $asset['access_token_for_location_lookup'] = $alt_char_full['access_token'];
-                            $character_asset_list_for_user[] = $asset;
-                        }
-                         if (!empty($alt_char_full['assets_last_updated'])) { echo '<p><small>' . sprintf(esc_html__('Assets for alt %s last updated: %s', 'eve-skill-plugin'), esc_html($alt_char_full['name']), esc_html(wp_date(get_option('date_format').' '.get_option('time_format'), (int)$alt_char_full['assets_last_updated']))) . '</small></p>';}
-                    } else { echo '<p>' . sprintf(esc_html__('No asset data found for alt character %s or not yet fetched.', 'eve-skill-plugin'), esc_html($alt_char_full['name'])) . '</p>';}
-                }
-            }
-            if ($user_assets_found && !empty($character_asset_list_for_user)) {
-                $filtered_assets_for_user = array_filter($character_asset_list_for_user, function($asset) use ($filter_char_name, $filter_item_name, $filter_location_name) {
-                    $char_match = empty($filter_char_name) || stripos($asset['char_name'], $filter_char_name) !== false;
-                    $item_name_resolved = esp_get_item_name($asset['type_id']);
-                    $item_match = empty($filter_item_name) || stripos($item_name_resolved, $filter_item_name) !== false;
-                    $location_name_resolved = esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token_for_location_lookup'] ?? null, $asset['char_id']);
-                    $location_match = empty($filter_location_name) || stripos($location_name_resolved, $filter_location_name) !== false;
-                    return $char_match && $item_match && $location_match;
-                });
-                if (!empty($filtered_assets_for_user)) {
-                    echo '<table class="assets-table widefat striped">';
-                    echo '<thead><tr><th>' . esc_html__( 'Character Name', 'eve-skill-plugin' ) . '</th><th>' . esc_html__( 'Item Name', 'eve-skill-plugin' ) . '</th><th>' . esc_html__( 'Quantity', 'eve-skill-plugin' ) . '</th><th>' . esc_html__( 'Location', 'eve-skill-plugin' ) . '</th><th>' . esc_html__( 'Location Flag', 'eve-skill-plugin' ) . '</th></tr></thead>';
-                    echo '<tbody>';
-                    usort($filtered_assets_for_user, function($a, $b) { $char_comp = strcmp($a['char_name'], $b['char_name']); if ($char_comp !== 0) return $char_comp; return strcmp(esp_get_item_name($a['type_id']), esp_get_item_name($b['type_id'])); });
-                    foreach ( $filtered_assets_for_user as $asset ) {
-                        $item_name = esp_get_item_name( $asset['type_id'] );
-                        $location_name = esp_get_location_name( $asset['location_id'], $asset['location_type'], $asset['access_token_for_location_lookup'] ?? null, $asset['char_id'] ); 
-                        $location_flag = $asset['location_flag'];
-                        echo '<tr>';
-                        echo '<td>' . esc_html( $asset['char_name'] ) . '</td>';
-                        echo '<td>' . esc_html( $item_name ) . ' (ID: ' . esc_html( $asset['type_id'] ) . ')' . ($asset['is_singleton'] ? ' <i>(Singleton)</i>':'') . (isset($asset['is_blueprint_copy']) && $asset['is_blueprint_copy'] ? ' <i>(BPC)</i>':''). '</td>';
-                        echo '<td class="quantity">' . esc_html( number_format( $asset['quantity'] ) ) . '</td>';
-                        echo '<td>' . esc_html( $location_name ) . '</td>';
-                        echo '<td>' . esc_html( $location_flag ) . '</td>';
-                        echo '</tr>';
-                    } echo '</tbody></table>';
-                } else if (!empty($filter_char_name) || !empty($filter_item_name) || !empty($filter_location_name)) { echo '<p>' . esc_html__( 'No assets found matching your current filter criteria for this user.', 'eve-skill-plugin' ) . '</p>'; } else { echo '<p>' . esc_html__( 'No asset data to display for this user.', 'eve-skill-plugin' ) . '</p>';}
-            } elseif (!$user_assets_found) { echo '<p>' . esc_html__( 'No EVE characters with asset data linked for this WordPress user.', 'eve-skill-plugin' ) . '</p>';}
-            echo '</div>'; 
-        } ?>
-    </div> <?php
-}
 
 // --- ESI DATA FETCHERS & HELPERS ---
 /**
