@@ -684,15 +684,12 @@ function esp_resolve_esi_ids_to_names(array $ids_to_resolve) {
 }
 
 /**
- * [DEBUG VERSION 2] Resolves corporation logos for a batch of character IDs efficiently.
- */
-/**
  * Resolves corporation logos for a batch of character IDs efficiently.
- * [CORRECTED VERSION 2]
+ * [CORRECTED VERSION 3]
  * @param array $character_ids An array of character IDs.
  * @return array A map of [character_id => 'logo_url.png'].
  */
-function esp_resolve_character_corp_logos(array $character_ids) {
+function esp_resolve_character_corp_logos(array $character_ids, $user_id) {
     static $logo_cache = []; // Per-request cache
     $character_ids = array_unique(array_filter($character_ids));
     if (empty($character_ids)) {
@@ -705,18 +702,14 @@ function esp_resolve_character_corp_logos(array $character_ids) {
     }
 
     $character_to_corp_map = [];
-    // The ESI endpoint for affiliations is limited, so we send requests in chunks.
     $affiliation_chunks = array_chunk($ids_to_fetch, 1000);
 
-    // 1. Get affiliations in bulk to map character -> corporation
+    // 1. Get affiliations in bulk
     foreach ($affiliation_chunks as $chunk) {
-        // THIS IS THE CORRECTED URL for the endpoint.
         $response = wp_remote_post('https://esi.evetech.net/latest/characters/affiliation/?datasource=tranquility', [
             'headers' => ['User-Agent' => EVE_SKILL_PLUGIN_USER_AGENT, 'Content-Type' => 'application/json', 'Accept' => 'application/json'],
-            'body' => json_encode($chunk), 
-            'timeout' => 20
+            'body' => json_encode($chunk), 'timeout' => 20
         ]);
-
         if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
             $affiliations = json_decode(wp_remote_retrieve_body($response), true);
             foreach ($affiliations as $affiliation) {
@@ -738,14 +731,14 @@ function esp_resolve_character_corp_logos(array $character_ids) {
                 $icons_data = json_decode(wp_remote_retrieve_body($icons_response), true);
                 $logo_url = $icons_data['px64x64'] ?? '';
             } else {
-                $logo_url = ''; // Failed lookup, cache empty string
+                $logo_url = '';
             }
             set_transient($transient_key, $logo_url, WEEK_IN_SECONDS);
         }
         $corp_to_logo_map[$corp_id] = $logo_url;
     }
 
-    // 3. Build the final map and update the static cache
+    // 3. Build the final map
     foreach ($ids_to_fetch as $char_id) {
         $corp_id = $character_to_corp_map[$char_id] ?? null;
         $logo_cache[$char_id] = $corp_id ? ($corp_to_logo_map[$corp_id] ?? '') : '';
@@ -1070,7 +1063,8 @@ function esp_display_user_transactions_table($user_id) {
     <form method="get" class="esp-filters">
         <input type="hidden" name="page" value="eve_view_all_user_skills">
         <input type="hidden" name="view_user_id" value="<?php echo esc_attr($user_id); ?>">
-
+		<input type="hidden" name="tab" value="transactions">
+		
         <label for="filter_char"><?php esc_html_e('Character:', 'eve-skill-plugin'); ?></label>
         <select name="filter_char" id="filter_char"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_chars) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_char, $val, false), esc_html($val)); } ?></select>
 
@@ -1113,7 +1107,7 @@ function esp_display_user_transactions_table($user_id) {
     $authenticated_ids_map = esp_get_all_authenticated_character_ids_map();
     $character_ids_for_logos = [];
     foreach($resolved_names_map as $id => $details) { if (isset($details['category']) && $details['category'] === 'character') { $character_ids_for_logos[] = $id; } }
-    $resolved_logos_map = esp_resolve_character_corp_logos($character_ids_for_logos);
+    $resolved_logos_map = esp_resolve_character_corp_logos($character_ids_for_logos, $user_id);
 
     usort($all_transactions, function($a, $b) { return strtotime($b['date']) - strtotime($a['date']); });
     $all_transactions = array_slice($all_transactions, 0, 250);
@@ -1156,14 +1150,13 @@ function esp_display_user_transactions_table($user_id) {
 
 
 /**
- * Renders a filterable table of assets for a given user's characters.
- *
- * @param int $user_id The WordPress user ID to display assets for.
+ * Renders a filterable table of assets for a given user's characters,
+ * with enhanced logic for wormhole and container locations.
  */
 function esp_display_user_assets_table($user_id) {
     echo '<div class="assets-viewer">';
 
-    // 1. Fetch and consolidate all asset data for the specified user
+    // 1. Fetch and consolidate all asset data
     $all_assets_raw = [];
     $characters_to_check = [];
     $main_char_id = get_user_meta($user_id, 'esp_main_eve_character_id', true);
@@ -1173,6 +1166,7 @@ function esp_display_user_assets_table($user_id) {
         foreach ($alt_characters as $alt) { if (isset($alt['id'])) { $characters_to_check[] = esp_get_character_data($user_id, $alt['id']); } }
     }
 
+    $item_map = []; // Used to trace containers
     foreach ($characters_to_check as $character) {
         if (empty($character) || empty($character['assets_data'])) continue;
         foreach ($character['assets_data'] as $asset) {
@@ -1180,6 +1174,7 @@ function esp_display_user_assets_table($user_id) {
             $asset['char_id'] = $character['id'];
             $asset['access_token'] = $character['access_token'];
             $all_assets_raw[] = $asset;
+            $item_map[$asset['item_id']] = $asset;
         }
     }
     
@@ -1188,60 +1183,110 @@ function esp_display_user_assets_table($user_id) {
         return;
     }
 
-    // 2. Gather unique values for filter dropdowns
-    $unique_chars = [];
-    $unique_items = [];
-    $unique_locations = [];
-
+    // 2. Pre-process assets to resolve final location and container status
+    $assets_with_resolved_loc = [];
     foreach($all_assets_raw as $asset) {
+        $current_asset = $asset;
+        $is_in_container = false;
+        
+        while ($current_asset['location_type'] === 'item') {
+            $is_in_container = true;
+            if (isset($item_map[$current_asset['location_id']])) {
+                $current_asset = $item_map[$current_asset['location_id']];
+            } else {
+                break;
+            }
+        }
+        
+        $asset['resolved_location_id'] = $current_asset['location_id'];
+        $asset['resolved_location_type'] = $current_asset['location_type'];
+        $asset['is_in_container'] = $is_in_container;
+        $assets_with_resolved_loc[] = $asset;
+    }
+
+    // 3. Gather unique values for filters from the resolved data
+    $unique_chars = []; $unique_items = []; $unique_locations = [];
+    foreach($assets_with_resolved_loc as $asset) {
         $unique_chars[$asset['char_name']] = true;
         $unique_items[esp_get_item_name($asset['type_id'])] = true;
-        $unique_locations[esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id'])] = true;
+        $location_name = esp_get_resolved_location_name($asset['resolved_location_id'], $asset['resolved_location_type'], $asset['access_token']);
+        $unique_locations[$location_name] = true;
     }
     ksort($unique_chars); ksort($unique_items); ksort($unique_locations);
 
-    // 3. Get current filter values from URL
+    // 4. Get current filter values from URL
     $filter_char = isset($_GET['filter_asset_char']) ? sanitize_text_field($_GET['filter_asset_char']) : '';
     $filter_item = isset($_GET['filter_asset_item']) ? sanitize_text_field($_GET['filter_asset_item']) : '';
     $filter_location = isset($_GET['filter_asset_location']) ? sanitize_text_field($_GET['filter_asset_location']) : '';
-    ?>
     
+    ?>
     <form method="get" class="esp-filters">
         <input type="hidden" name="page" value="eve_view_all_user_skills">
         <input type="hidden" name="view_user_id" value="<?php echo esc_attr($user_id); ?>">
-        <label><?php esc_html_e('Character:', 'eve-skill-plugin'); ?> <select name="filter_asset_char"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_chars) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_char, $val, false), esc_html($val)); } ?></select></label>
-        <label><?php esc_html_e('Item Name:', 'eve-skill-plugin'); ?> <select name="filter_asset_item"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_items) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_item, $val, false), esc_html($val)); } ?></select></label>
-        <label><?php esc_html_e('Location:', 'eve-skill-plugin'); ?> <select name="filter_asset_location"><option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option><?php foreach (array_keys($unique_locations) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_location, $val, false), esc_html($val)); } ?></select></label>
+        <input type="hidden" name="tab" value="assets">
+        
+        <label><?php esc_html_e('Character:', 'eve-skill-plugin'); ?>
+            <select name="filter_asset_char">
+                <option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option>
+                <?php foreach (array_keys($unique_chars) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_char, $val, false), esc_html($val)); } ?>
+            </select>
+        </label>
+
+        <label><?php esc_html_e('Item Name:', 'eve-skill-plugin'); ?>
+            <select name="filter_asset_item">
+                <option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option>
+                <?php foreach (array_keys($unique_items) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_item, $val, false), esc_html($val)); } ?>
+            </select>
+        </label>
+
+        <label><?php esc_html_e('Location:', 'eve-skill-plugin'); ?>
+            <select name="filter_asset_location">
+                <option value=""><?php esc_html_e('All', 'eve-skill-plugin'); ?></option>
+                <?php foreach (array_keys($unique_locations) as $val) { printf('<option value="%s" %s>%s</option>', esc_attr($val), selected($filter_location, $val, false), esc_html($val)); } ?>
+            </select>
+        </label>
+
         <input type="submit" class="button button-primary" value="<?php esc_attr_e('Filter', 'eve-skill-plugin'); ?>">
-        <a href="<?php echo esc_url(admin_url('admin.php?page=eve_view_all_user_skills&view_user_id=' . $user_id)); ?>" class="button"><?php esc_html_e('Clear', 'eve-skill-plugin'); ?></a>
+        <a href="<?php echo esc_url(admin_url('admin.php?page=eve_view_all_user_skills&view_user_id=' . $user_id . '&tab=assets')); ?>" class="button"><?php esc_html_e('Clear', 'eve-skill-plugin'); ?></a>
     </form>
     
     <?php
-    // 4. Apply filters
-    $filtered_assets = $all_assets_raw;
+    // 5. Apply filters
+    $filtered_assets = $assets_with_resolved_loc;
     if ($filter_char || $filter_item || $filter_location) {
-        $filtered_assets = array_filter($all_assets_raw, function($asset) use ($filter_char, $filter_item, $filter_location) {
+        $filtered_assets = array_filter($assets_with_resolved_loc, function($asset) use ($filter_char, $filter_item, $filter_location) {
             $item_name = esp_get_item_name($asset['type_id']);
-            $location_name = esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id']);
+            $location_name = esp_get_resolved_location_name($asset['resolved_location_id'], $asset['resolved_location_type'], $asset['access_token']);
             if ($filter_char && $asset['char_name'] !== $filter_char) return false;
             if ($filter_item && $item_name !== $filter_item) return false;
             if ($filter_location && $location_name !== $filter_location) return false;
             return true;
         });
     }
+
     ?>
     <table class="wp-list-table widefat fixed striped">
-        <thead><tr><th><?php esc_html_e('Character', 'eve-skill-plugin'); ?></th><th><?php esc_html_e('Item Name', 'eve-skill-plugin'); ?></th><th style="text-align:right;"><?php esc_html_e('Quantity', 'eve-skill-plugin'); ?></th><th><?php esc_html_e('Location', 'eve-skill-plugin'); ?></th></tr></thead>
+        <thead>
+            <tr>
+                <th><?php esc_html_e('Character', 'eve-skill-plugin'); ?></th>
+                <th><?php esc_html_e('Item Name', 'eve-skill-plugin'); ?></th>
+                <th style="text-align:right;"><?php esc_html_e('Quantity', 'eve-skill-plugin'); ?></th>
+                <th><?php esc_html_e('Location', 'eve-skill-plugin'); ?></th>
+            </tr>
+        </thead>
         <tbody>
             <?php if (empty($filtered_assets)) : ?>
                 <tr><td colspan="4"><?php esc_html_e('No assets match the current filter.', 'eve-skill-plugin'); ?></td></tr>
             <?php else : ?>
-                <?php foreach ($filtered_assets as $asset) : ?>
+                <?php foreach ($filtered_assets as $asset) : 
+                    $location_name = esp_get_resolved_location_name($asset['resolved_location_id'], $asset['resolved_location_type'], $asset['access_token']);
+                    $location_display = (strpos($location_name, 'J') === 0 && $asset['is_in_container']) ? $location_name . ' (Container)' : $location_name;
+                ?>
                     <tr>
                         <td><?php echo esc_html($asset['char_name']); ?></td>
                         <td><?php echo esc_html(esp_get_item_name($asset['type_id'])); ?></td>
                         <td style="text-align:right;"><?php echo esc_html(number_format($asset['quantity'])); ?></td>
-                        <td><?php echo esc_html(esp_get_location_name($asset['location_id'], $asset['location_type'], $asset['access_token'], $asset['char_id'])); ?></td>
+                        <td><?php echo esc_html($location_display); ?></td>
                     </tr>
                 <?php endforeach; ?>
             <?php endif; ?>
@@ -1339,7 +1384,7 @@ function esp_render_view_all_user_skills_page() {
            // This is the HTML block for the chart.
             echo '<hr style="margin: 30px 0;" />';
             ?>
-
+		
             <div id="esp-wallet-chart-container">
                 <h2><?php esc_html_e('Wallet Balance History (Last 90 Days)', 'eve-skill-plugin'); ?></h2>
                 <div>
@@ -1354,7 +1399,7 @@ function esp_render_view_all_user_skills_page() {
             </div>
             <?php wp_nonce_field('esp_wallet_chart_nonce', 'esp_wallet_chart_nonce'); ?>
 
-            <!-- NEW TABBED INTERFACE START -->
+                        <!-- NEW TABBED INTERFACE START -->
             <style>
                 .esp-tabs-nav { display: flex; border-bottom: 2px solid #ccc; margin-bottom: -2px; padding-left: 0; }
                 .esp-tabs-nav li { list-style: none; margin-bottom: 0; }
@@ -1364,15 +1409,20 @@ function esp_render_view_all_user_skills_page() {
                 .esp-tab-content.active { display: block; }
             </style>
 
+            <?php
+            // Get the active tab from the URL, defaulting to 'transactions'.
+            $active_tab = isset($_GET['tab']) && in_array($_GET['tab'], ['transactions', 'assets']) ? sanitize_key($_GET['tab']) : 'transactions';
+            ?>
+
             <ul class="esp-tabs-nav">
-                <li class="active"><a href="#tab-transactions"><?php esc_html_e('Recent Wallet Transactions', 'eve-skill-plugin'); ?></a></li>
-                <li><a href="#tab-assets"><?php esc_html_e('Assets', 'eve-skill-plugin'); ?></a></li>
+                <li class="<?php echo $active_tab === 'transactions' ? 'active' : ''; ?>"><a href="#tab-transactions"><?php esc_html_e('Recent Wallet Transactions', 'eve-skill-plugin'); ?></a></li>
+                <li class="<?php echo $active_tab === 'assets' ? 'active' : ''; ?>"><a href="#tab-assets"><?php esc_html_e('Assets', 'eve-skill-plugin'); ?></a></li>
             </ul>
 
-            <div id="tab-transactions" class="esp-tab-content active">
+            <div id="tab-transactions" class="esp-tab-content <?php echo $active_tab === 'transactions' ? 'active' : ''; ?>">
                 <?php esp_display_user_transactions_table($selected_user_id); ?>
             </div>
-            <div id="tab-assets" class="esp-tab-content">
+            <div id="tab-assets" class="esp-tab-content <?php echo $active_tab === 'assets' ? 'active' : ''; ?>">
                 <?php esp_display_user_assets_table($selected_user_id); ?>
             </div>
 
@@ -1389,6 +1439,12 @@ function esp_render_view_all_user_skills_page() {
                         
                         document.querySelectorAll('.esp-tab-content').forEach(panel => panel.classList.remove('active'));
                         document.querySelector(targetId).classList.add('active');
+
+                        // Also update the URL in the browser bar without reloading the page
+                        const url = new URL(window.location);
+                        const tabName = targetId.substring(5); // gets 'transactions' or 'assets'
+                        url.searchParams.set('tab', tabName);
+                        window.history.pushState({}, '', url);
                     });
                 });
             });
@@ -1512,93 +1568,74 @@ function esp_get_item_name( $type_id ) {
     } 
     return $item_name;
 }
+
 /**
- * Resolves an ESI location ID to a human-readable name.
+ * Resolves a location ID to a meaningful name, with robust handling for
+ * stations, private structures (using tokens), and solar systems.
  *
- * This function checks for a cached name in a transient first. If not found, it
- * queries the appropriate ESI endpoint based on the location type (station,
- * structure, etc.). It includes a fallback to check for solar systems if a
- * structure lookup fails.
- *
- * @param int    $location_id                      The ID of the location (station, structure, etc.).
- * @param string $location_type                    The type of location from ESI (e.g., 'station', 'structure').
- * @param string|null $access_token                An access token, required for private structure lookups.
- * @param int|null $character_id_for_structure_lookup The character ID needed for the structure lookup endpoint.
- * @return string                                  The resolved location name or a formatted ID string if lookup fails.
+ * @param int         $location_id   The ID of the location.
+ * @param string      $location_type The type of location ('station', 'structure', 'solar_system').
+ * @param string|null $access_token  A valid ESI access token, required for private structures.
+ * @return string                    The resolved location name.
  */
-function esp_get_location_name($location_id, $location_type, $access_token = null, $character_id_for_structure_lookup = null) {
-    $location_id = (int)$location_id; 
-    if ($location_id <= 0) {
-        return "Invalid Location ID";
+function esp_get_resolved_location_name($location_id, $location_type, $access_token) {
+    if (empty($location_id)) {
+        return 'Unknown Location';
     }
 
-    $transient_key = 'esp_loc_name_' . $location_id; 
+    $transient_key = 'esp_resolved_loc_name_' . $location_id;
     $location_name = get_transient($transient_key);
 
     if (false === $location_name) {
-        $esi_url = '';
-        switch ($location_type) {
-            case 'station': 
-                $esi_url = "https://esi.evetech.net/latest/universe/stations/{$location_id}/?datasource=tranquility"; 
-                break;
-            case 'structure': 
-                if ($access_token && $character_id_for_structure_lookup) { 
-                     $esi_url = "https://esi.evetech.net/latest/universe/structures/{$location_id}/?datasource=tranquility";
-                } else {
-                    $location_name = "Structure (ID: {$location_id})";
-                    set_transient($transient_key, $location_name, HOUR_IN_SECONDS); 
-                    return $location_name;
-                } 
-                break;
-            case 'solar_system':
-                // This is often a fallback, handle it after the main lookup
-                break;
-            case 'item': 
-                $location_name = "In Container (ID: {$location_id})"; 
-                set_transient($transient_key, $location_name, DAY_IN_SECONDS); 
-                return $location_name;
-            default: 
-                $location_name = ucfirst(str_replace('_', ' ', $location_type)) . " (ID: {$location_id})"; 
-                set_transient($transient_key, $location_name, DAY_IN_SECONDS); 
-                return $location_name;
-        }
+        $location_name = "ID: {$location_id}"; // Default fallback
 
-        if (!empty($esi_url)) {
-            $headers = ['User-Agent' => EVE_SKILL_PLUGIN_USER_AGENT, 'Accept-Language' => 'en-us'];
-            if ($access_token && ($location_type == 'structure')) { 
-                $headers['Authorization'] = 'Bearer ' . $access_token; 
+        // Case 1: The location is a public station
+        if ($location_type === 'station') {
+            $station_url = "https://esi.evetech.net/latest/universe/stations/{$location_id}/?datasource=tranquility";
+            $response = wp_remote_get($station_url, ['headers' => ['User-Agent' => EVE_SKILL_PLUGIN_USER_AGENT]]);
+            if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+                $data = json_decode(wp_remote_retrieve_body($response), true);
+                $location_name = $data['name'] ?? $location_name;
             }
-            $response = wp_remote_get($esi_url, ['headers' => $headers]);
+        } 
+        // Case 2: The location is a structure (requires authentication)
+        elseif ($location_type === 'structure' && !empty($access_token)) {
+            $structure_url = "https://esi.evetech.net/latest/universe/structures/{$location_id}/?datasource=tranquility";
+            $headers = [
+                'User-Agent'    => EVE_SKILL_PLUGIN_USER_AGENT,
+                'Authorization' => 'Bearer ' . $access_token
+            ];
+            $response = wp_remote_get($structure_url, ['headers' => $headers]);
 
             if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
                 $data = json_decode(wp_remote_retrieve_body($response), true);
-                $location_name = $data['name'] ?? "Location {$location_id} (Name N/A)";
-                set_transient($transient_key, $location_name, DAY_IN_SECONDS * 7);
-            } else {
-                // Fallback for failed structure lookups: try as a solar system.
-                $error_code = is_wp_error($response) ? 0 : wp_remote_retrieve_response_code($response);
-                if ($location_type == 'structure' && ($error_code == 403 || $error_code == 404)) {
-                     $location_type = 'solar_system'; // Force a solar system check
+                $system_id = $data['solar_system_id'] ?? null;
+                
+                // For any structure, we want its solar system's name.
+                if ($system_id) {
+                    // This is a recursive call to resolve the system name, which will be cached.
+                    $location_name = esp_get_resolved_location_name($system_id, 'solar_system', null);
                 } else {
-                    $location_name = "Location {$location_id} (Lookup Failed - {$error_code})";
-                    set_transient($transient_key, $location_name, HOUR_IN_SECONDS);
+                    $location_name = $data['name'] ?? $location_name; // Fallback to structure name if system ID is missing
                 }
+            } else {
+                 error_log("[ESP] Failed to resolve structure ID {$location_id}. Code: " . wp_remote_retrieve_response_code($response));
             }
         }
-        
-        // If we need to check for a solar system (either originally or as a fallback)
-        if ($location_type == 'solar_system') {
-            $sys_esi_url = "https://esi.evetech.net/latest/universe/systems/{$location_id}/?datasource=tranquility";
-            $sys_response = wp_remote_get($sys_esi_url, ['headers' => ['User-Agent' => EVE_SKILL_PLUGIN_USER_AGENT, 'Accept-Language' => 'en-us']]);
-            if(!is_wp_error($sys_response) && wp_remote_retrieve_response_code($sys_response) === 200) {
-                $sys_data = json_decode(wp_remote_retrieve_body($sys_response), true);
-                $location_name = $sys_data['name'] ?? "System ID: {$location_id}";
-            } else { 
-                $location_name = "System/Structure ID: {$location_id} (Lookup Failed)";
+        // Case 3: The location is a solar system ID directly
+        elseif ($location_type === 'solar_system') {
+            $system_url = "https://esi.evetech.net/latest/universe/systems/{$location_id}/?datasource=tranquility";
+            $response = wp_remote_get($system_url, ['headers' => ['User-Agent' => EVE_SKILL_PLUGIN_USER_AGENT]]);
+            if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+                $data = json_decode(wp_remote_retrieve_body($response), true);
+                $location_name = $data['name'] ?? $location_name;
             }
-            set_transient($transient_key, $location_name, DAY_IN_SECONDS * 7);
         }
-    } 
+
+        // Cache the final resolved name for 1 week to minimize API calls.
+        set_transient($transient_key, $location_name, WEEK_IN_SECONDS);
+    }
+    
     return $location_name;
 }
 
@@ -2099,7 +2136,7 @@ function esp_ajax_get_wallet_chart_data() {
     $chart_data = esp_get_wallet_chart_data_for_user($user_id);
 
     if (empty($chart_data['datasets'])) {
-        wp_send_json_error(['message' => 'No wallet history data could be calculated for this user.'], 404);
+        wp_send_json_error(['message' => 'No wallet history data could be calculated for this user. Use the Force Data refresh button.'], 404);
         return;
     }
     
